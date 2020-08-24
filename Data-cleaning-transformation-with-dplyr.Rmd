@@ -1,0 +1,191 @@
+---
+title: "Data cleaning & transformation with dplyr"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## GitHub Documents
+
+This is an R Markdown format used for publishing markdown documents to GitHub. When you click the **Knit** button all R code chunks are run and a markdown file (.md) suitable for publishing to GitHub is generated.
+
+## R directories set ups
+
+```{r}
+dir.create("data")
+dir.create("data_output")
+dir.create("m_output")
+```
+
+## Load the libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+```
+
+## Upload dataset
+
+```{r}
+trains <- read_csv("data/trains.csv")
+trains
+write.csv (trains, "trains.csv")
+```
+## Renaming variables
+
+```{r}
+names(trains)
+trains2 <- rename(trains,
+                index = Statistics,
+                rdate = REF_DATE)
+
+trains2
+```
+## Recoding values
+
+```{r}
+unique(trains2$Companies)
+unique(trains2$index)
+unique(trains2$rdate)
+unique(trains2$Commodities)
+trains2$UOM
+trains2$Companies <- recode (trains2$Companies, CSXT = "CSX")
+trains2$index <- recode (trains2$index, 
+                         "Average train speed" = "avspeed",
+                         "Weekly average dwell time at origin" = "w ave", 
+                         "Weekly average number of trains holding per day (crew)" = "CREW w.avetr", 
+                         "Weekly average number of trains holding per day (locomotive)" = "loc w.avetr",
+                         "Weekly average number of trains holding per day (other)" = "other w.avetr",
+                         "Weekly average number of trains holding per day (all)" = "all w.avetr",
+                         "Weekly average number of loaded cars in revenue service that have not moved 48 hours or greater" = "w.avecarl 48h",
+                         "Weekly average number of empty cars in revenue service that have not moved 48 hours or greater" = "w.avecare-48h")
+trains2$UOM <- recode(trains2$UOM, "Kilometres per hour" = "km/h", 
+                      "Hour" = "h", 
+                      "Number" = "n#")
+                           
+trains2
+```
+
+## Subsetting dataframes
+
+```{r}
+CN_oil <- filter(trains2, Companies == "Canadian National", Commodities == "Crude oil")
+CN_oil
+```
+
+## How many items were removed?
+
+```{r}
+nrow(trains2) - nrow(CN_oil)
+```
+# Selecting variables
+## specify the variables to keep by name
+
+```{r}
+tr_comp <- dplyr::select(trains2, rdate, Companies, Commodities, index, VALUE, UOM_ID, DGUID)
+tr_comp
+```
+
+## specify the variables you want to remove with a -
+
+```{r}
+tr_comp_r <- select(trains2, -UOM_ID, -DGUID)
+tr_comp_r
+```
+## reorder columns, combined with everything()
+
+```{r}
+trains2_reordered <- select(trains2, Companies, rdate, everything())
+trains2_reordered
+```
+
+# Order data
+## The arrange() function in the dplyr package allows you to sort your data by alphabetical or numerical order.
+
+```{r}
+trains2_arrange <- arrange(trains2, Companies)
+trains2_arrange
+```
+## use desc() to sort a variable in descending order
+
+```{r}
+trains2_compbydatedesc <- arrange(trains2, desc(rdate))
+trains2_compbydatedesc
+```
+
+## order data based on multiple variables (e.g. sort first by date, then by value)
+
+```{r}
+trainsadateValue <- arrange(trains2, desc(rdate), desc(VALUE))
+```
+# Creating new variables
+## the mutate() function allows to create new variables. Here, we use the str_sub() function from the stringr package to extract the first character of the callnumber variable (the call number class) and put it into a new column called call_class.
+
+```{r}
+trains2_datesplit <- trains2 %>%
+  dplyr::mutate(trains,
+                year = lubridate::year(rdate), 
+                month = lubridate::month(rdate), 
+                day = lubridate::day(rdate)) %>% 
+          select(-rdate, year, month, day, Companies, Commodities, index, UOM, VALUE)
+```
+
+# Putting it all together with %>%
+# the Pipe Operator %>% is loaded with the tidyverse. It takes the output of one statement and makes it the input of the next statement.
+# it is used with Ctrl + Shift + M if you have a PC or Cmd + Shift + M if you have a Mac.
+
+```{r}
+trains_compl_search <- trains2_datesplit %>% 
+  filter(Companies == "Canadian National", Commodities == "Crude oil", year == "2019") %>% 
+  select(month, index, VALUE, -year) %>% 
+  drop_na() %>% 
+  group_by(month) %>% 
+  summarize(mean_index = mean(VALUE))
+trains_compl_search
+```
+## Create a vector base for the graphs
+
+```{r}
+cleaned_t2<-trains2 %>%
+  select(rdate, index, Commodities, Companies, VALUE ) %>%
+  drop_na()%>%
+  arrange(rdate)
+cleaned_t2
+```
+
+# scatterplot
+
+```{r}
+ggplotbase <-cleaned_t2 %>%
+  filter(Companies == "Canadian Pacific", index == "all w.avetr") %>%
+  ggplot(mapping = aes(x = rdate, y = VALUE, color = Commodities)) 
+ggplotbase +  geom_point(size = 2) +
+  labs(title = "Weekly average number of trains holding per day",
+       subtitle = "Canadian Pacific",
+       y = "VALUE",
+       x = "rdate") + theme_bw(base_size = 15)
+```
+# bar chart
+
+```{r}
+ggplotbase <- cleaned_t2 %>%
+  filter(Companies == "Canadian Pacific", index == "all w.avetr") %>%
+  ggplot()
+ggplotbase +geom_bar(aes(x = rdate, y = VALUE, fill = Commodities), position = position_stack(reverse = TRUE), stat="identity") +
+  labs(title = "Weekly average number of trains holding per day: Canadian Pacific", 
+       y = "VALUE",
+       x = "rdate") + 
+  theme(legend.position = "top", plot.title = element_text(hjust = 0.5))+
+  scale_fill_discrete(breaks=c("System-wide","Other commodities","Manifest", "Intermodal", "Grain", "Ethanol", "Crude oil", "Coal"< "Automotive"))
+```
+
+## Write an output
+
+```{r}
+write.csv(cleaned_t2, "trains_output_final.csv", row.names = F)
+```
